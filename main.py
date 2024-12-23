@@ -2,6 +2,7 @@ from playwright.sync_api import sync_playwright
 from dataclasses import dataclass, asdict, field
 import pandas as pd
 import argparse
+import json
 
 l1=[]
 l2=[]
@@ -39,10 +40,13 @@ def extract_data(xpath, data_list, page):
         data = ""
     data_list.append(data)
 
-def main():
+def main(search_query=None):
+    global search_for
+    if search_query:
+        search_for = search_query
+
     with sync_playwright() as p:
-        # browser = p.chromium.launch(headless=False)
-        browser = p.chromium.launch(executable_path='C:\Program Files\Google\Chrome\Application\chrome.exe', headless=False)
+        browser = p.chromium.launch(headless=False)
         page = browser.new_page()
 
         page.goto("https://www.google.com/maps/@32.9817464,70.1930781,3.67z?", timeout=60000)
@@ -52,39 +56,26 @@ def main():
         page.keyboard.press("Enter")
         page.wait_for_selector('//a[contains(@href, "https://www.google.com/maps/place")]')
 
-
-       
         page.hover('//a[contains(@href, "https://www.google.com/maps/place")]')
-
         
         previously_counted = 0
         while True:
             page.mouse.wheel(0, 10000)
-            # page.wait_for_timeout(3000)
             page.wait_for_selector('//a[contains(@href, "https://www.google.com/maps/place")]')
 
-
-            if (page.locator( '//a[contains(@href, "https://www.google.com/maps/place")]').count() >= total):
-                listings = page.locator( '//a[contains(@href, "https://www.google.com/maps/place")]').all()[:total]
-                listings = [listing.locator("xpath=..") for listing in listings]
-                print(f"Total Found: {len(listings)}")
+            current_count = page.locator('//a[contains(@href, "https://www.google.com/maps/place")]').count()
+            if current_count == previously_counted:
+                listings = page.locator('//a[contains(@href, "https://www.google.com/maps/place")]').all()
+                print(f"Found all available listings: {len(listings)}")
                 break
-            else: #The loop should not run infinitely
-                if (page.locator( '//a[contains(@href, "https://www.google.com/maps/place")]' ).count() == previously_counted ):
-                    listings = page.locator( '//a[contains(@href, "https://www.google.com/maps/place")]' ).all()
-                    print(f"Arrived at all available\nTotal Found: {len(listings)}")
-                    break
-                else:
-                    previously_counted = page.locator( '//a[contains(@href, "https://www.google.com/maps/place")]' ).count()
-                    print( f"Currently Found: ", page.locator( '//a[contains(@href, "https://www.google.com/maps/place")]' ).count(), )
-
+            else:
+                previously_counted = current_count
+                print(f"Currently Found: {current_count}")
        
         # scraping
         for listing in listings:
             listing.click()
-            # page.wait_for_timeout(5000)
             page.wait_for_selector('//div[@class="TIHn2 "]//h1[@class="DUwDvf lfPIob"]')
-            # page.wait_for_timeout(5000)
            
             name_xpath = '//div[@class="TIHn2 "]//h1[@class="DUwDvf lfPIob"]'
             address_xpath = '//button[@data-item-id="address"]//div[contains(@class, "fontBodyMedium")]'
@@ -219,29 +210,50 @@ def main():
             extract_data(phone_number_xpath, phones_list, page)
             extract_data(place_type_xpath, place_t_list, page)
   
-        df = pd.DataFrame(list(zip(names_list, website_list,intro_list,phones_list,address_list,reviews_c_list,reviews_a_list,store_s_list,in_store_list,store_del_list,place_t_list,open_list)), columns =['Names','Website','Introduction','Phone Number','Address','Review Count','Average Review Count','Store Shopping','In Store Pickup','Delivery','Type','Opens At'])
-        for column in df.columns:
-            if df[column].nunique() == 1:
-                df.drop(column, axis=1, inplace=True)
-        df.to_csv(r'result.csv', index = False)
+        # Create a list to store all results
+        results = []
+        for i in range(len(names_list)):
+            result = {
+                "id": i + 1,
+                "name": names_list[i],
+                "website": website_list[i],
+                "introduction": intro_list[i],
+                "phone_number": phones_list[i],
+                "address": address_list[i],
+                "review_count": reviews_c_list[i],
+                "average_review": reviews_a_list[i],
+                "store_shopping": store_s_list[i],
+                "in_store_pickup": in_store_list[i],
+                "delivery": store_del_list[i],
+                "type": place_t_list[i],
+                "opens_at": open_list[i]
+            }
+            results.append(result)
+
+        # Create the final JSON structure
+        json_output = {
+            search_for: {
+                "results": results
+            }
+        }
+
+        # Save to JSON file
+        with open('results.json', 'w', encoding='utf-8') as f:
+            json.dump(json_output, f, indent=2, ensure_ascii=False)
+
         browser.close()
-        print(df.head())
+        print(f"Successfully scraped {len(results)} results and saved to results.json")
 
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--search", type=str)
-    parser.add_argument("-t", "--total", type=int)
     args = parser.parse_args()
 
     if args.search:
         search_for = args.search
     else:
         search_for = "turkish stores in toronto Canada"
-    if args.total:
-        total = args.total
-    else:
-        total = 1
 
     main()
